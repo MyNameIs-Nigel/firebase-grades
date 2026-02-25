@@ -79,32 +79,30 @@
         <div id="grid" class="grid" aria-label="Course grade cards"></div>
       </section>
 
-      <!-- Coursework summary section (NEW) -->
-      <section aria-labelledby="courseworkTitle" style="margin-top:22px;">
+      <!-- Assignments section -->
+      <section aria-labelledby="assignmentsTitle" style="margin-top:22px;">
         <div class="section-header">
           <div>
-            <h2 id="courseworkTitle">Coursework load (now → selected date)</h2>
-            <div class="subtle" id="courseworkStatus" aria-live="polite">
-              Select a date to estimate assignments/points due between now and then.
+            <h2 id="assignmentsTitle">Coursework</h2>
+            <div class="subtle">
+              <span><strong id="assignmentCount">—</strong> assignments</span>
+              <span aria-hidden="true"> • </span>
+              <span>Last synced: <strong id="assignmentsLastSynced">—</strong></span>
             </div>
           </div>
+          <button id="refreshAssignmentsBtn" class="btn primary" type="button">
+            <span id="assignmentsSpinner" class="spinner hidden" aria-hidden="true"></span>
+            <span id="assignmentsBtnText">Refresh Assignments</span>
+          </button>
         </div>
 
-        <div class="card">
-          <div class="controls-row" role="group" aria-label="Coursework load controls">
-            <div>
-              <label for="courseworkEndDate">Target date</label>
-              <input id="courseworkEndDate" type="date" />
-            </div>
+        <div id="coursePills" class="course-pills" role="tablist" aria-label="Filter by course"></div>
 
-            <button id="courseworkBtn" class="btn primary" type="button">
-              <span id="courseworkSpinner" class="spinner hidden" aria-hidden="true"></span>
-              <span id="courseworkBtnText">Check Coursework Load</span>
-            </button>
-          </div>
-
-          <div id="courseworkResult" style="margin-top:14px;"></div>
+        <div id="assignmentsEmpty" class="empty hidden" role="status" aria-live="polite">
+          No assignments found. Click <strong>Refresh Assignments</strong> to sync from Canvas.
         </div>
+
+        <div id="assignmentsList" aria-label="Assignments list"></div>
       </section>
     </div>
   </main>

@@ -209,29 +209,13 @@ async function fetchAllCanvas(url, token) {
 }
 
 // Courses that exist in Canvas but aren't real classes — skip them everywhere
-const IGNORED_COURSE_NAMES = new Set([
-  "cse majors",
-  "mathematics majors"
+const IGNORED_COURSE_IDS = new Set([
+  48558,
+  47054
 ]);
 
-function isIgnoredCourse(name) {
-  return IGNORED_COURSE_NAMES.has((name || "").trim().toLowerCase());
-}
-
-/** parse + validate ISO dates from request body */
-function parseISODateOrThrow(value, label) {
-  if (!value || typeof value !== "string") {
-    const err = new Error(`Missing ${label}. Expected ISO string.`);
-    err.status = 400;
-    throw err;
-  }
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) {
-    const err = new Error(`Invalid ${label}. Expected ISO date string.`);
-    err.status = 400;
-    throw err;
-  }
-  return d;
+function isIgnoredCourse(courseId) {
+  return IGNORED_COURSE_IDS.has(courseId);
 }
 
 /** small concurrency limiter (keeps Canvas requests sane from home server) */
@@ -251,25 +235,12 @@ async function mapLimit(items, limit, asyncFn) {
   return results;
 }
 
-/** fetch assignments for a course and filter by due_at within range */
-async function getAssignmentsDueInRange(courseId, startDate, endDate) {
-  // include[] makes sure points_possible is present in responses in most Canvas setups
+/** fetch all assignments for a course, including submission data */
+async function fetchCourseAssignments(courseId) {
   const url =
     `${CANVAS_BASE_URL}/api/v1/courses/${courseId}/assignments` +
-    `?per_page=100&include[]=submission&include[]=score_statistics`;
-
-  const assignments = await fetchAllCanvas(url, CANVAS_TOKEN);
-
-  const startMs = startDate.getTime();
-  const endMs = endDate.getTime();
-
-  // Filter to due_at within [start,end]
-  return assignments.filter(a => {
-    if (!a?.due_at) return false;
-    const dueMs = new Date(a.due_at).getTime();
-    if (Number.isNaN(dueMs)) return false;
-    return dueMs >= startMs && dueMs <= endMs;
-  });
+    `?per_page=100&include[]=submission`;
+  return fetchAllCanvas(url, CANVAS_TOKEN);
 }
 
 // --------------------
@@ -293,7 +264,7 @@ app.post("/refresh", async (req, res) => {
     console.log("[/refresh] fetching Canvas courses...");
     const courses = await fetchAllCanvas(url, CANVAS_TOKEN);
     console.log("[/refresh] Canvas returned", courses.length, "courses");
-    const filteredCourses = courses.filter(c => !isIgnoredCourse(c.name));
+    const filteredCourses = courses.filter(c => !isIgnoredCourse(c.id));
     if (filteredCourses.length !== courses.length) {
       console.log("[/refresh] ignored", courses.length - filteredCourses.length, "non-class course(s)");
     }
@@ -345,90 +316,94 @@ app.post("/refresh", async (req, res) => {
 });
 
 /**
- * Coursework summary endpoint used by the frontend.
+ * Refresh assignments — pulls all assignments (with submission data) from
+ * Canvas for every active, non-ignored course and writes them to the
+ * Firestore "assignments" collection. The frontend can then read/query
+ * that collection in real time via onSnapshot.
  *
- * POST /coursework-summary
- * Body: { startDate: ISO, endDate: ISO }
- * Returns:
- * {
- *   ok: true,
- *   startDate, endDate,
- *   totalAssignments,
- *   totalPoints,
- *   byCourse: [{ courseId, courseName, assignmentsCount, points }]
- * }
+ * POST /refresh-assignments
+ * Returns: { ok, assignments, courses, last_updated }
  */
-app.post("/coursework-summary", async (req, res) => {
+app.post("/refresh-assignments", async (req, res) => {
   const started = Date.now();
-  console.log("[/coursework-summary] START", new Date().toISOString());
+  console.log("[/refresh-assignments] START", new Date().toISOString());
 
   try {
     const user = await requireFirebaseUser(req);
-    console.log("[/coursework-summary] auth OK for", user.email);
+    console.log("[/refresh-assignments] auth OK for", user.email);
 
-    const startDate = parseISODateOrThrow(req.body?.startDate, "startDate");
-    const endDate = parseISODateOrThrow(req.body?.endDate, "endDate");
-
-    if (endDate.getTime() < startDate.getTime()) {
-      const err = new Error("endDate must be >= startDate.");
-      err.status = 400;
-      throw err;
-    }
-
-    // Fetch active courses (same pattern as /refresh)
     const coursesUrl =
       `${CANVAS_BASE_URL}/api/v1/courses` +
       `?enrollment_state=active&per_page=100`;
 
-    console.log("[/coursework-summary] fetching Canvas courses...");
+    console.log("[/refresh-assignments] fetching Canvas courses...");
     const allCourses = await fetchAllCanvas(coursesUrl, CANVAS_TOKEN);
-    const courses = allCourses.filter(c => !isIgnoredCourse(c.name));
-    console.log("[/coursework-summary] using", courses.length, "of", allCourses.length, "courses (filtered non-class courses)");
+    const courses = allCourses.filter(c => !isIgnoredCourse(c.id));
+    console.log("[/refresh-assignments] using", courses.length, "of", allCourses.length, "courses");
 
-    // Fetch assignments per course with a concurrency limit
-    console.log("[/coursework-summary] fetching assignments per course...");
+    console.log("[/refresh-assignments] fetching assignments per course...");
     const perCourse = await mapLimit(courses, 5, async (course) => {
-      const courseId = course.id;
-      const courseName = course.name ?? "(Unnamed course)";
-
-      const dueAssignments = await withTimeout(
-        getAssignmentsDueInRange(courseId, startDate, endDate),
+      const assignments = await withTimeout(
+        fetchCourseAssignments(course.id),
         20000,
-        `assignments(course ${courseId})`
+        `assignments(course ${course.id})`
       );
-
-      const assignmentsCount = dueAssignments.length;
-      const points = dueAssignments.reduce((sum, a) => {
-        const p = Number(a?.points_possible);
-        return sum + (Number.isFinite(p) ? p : 0);
-      }, 0);
-
-      return {
-        courseId: String(courseId),
-        courseName,
-        assignmentsCount,
-        points
-      };
+      return assignments.map(a => ({
+        ...a,
+        _courseId: course.id,
+        _courseName: course.name || "(Unnamed course)"
+      }));
     });
 
-    const byCourse = perCourse
-      .filter(c => c.assignmentsCount > 0)
-      .sort((a, b) => b.assignmentsCount - a.assignmentsCount);
+    const flatAssignments = perCourse.flat();
+    console.log("[/refresh-assignments] total assignments:", flatAssignments.length);
 
-    const totalAssignments = byCourse.reduce((sum, c) => sum + c.assignmentsCount, 0);
-    const totalPoints = byCourse.reduce((sum, c) => sum + c.points, 0);
+    const now = admin.firestore.Timestamp.now();
+    const BATCH_LIMIT = 500;
+    let written = 0;
 
-    console.log("[/coursework-summary] DONE in", Date.now() - started, "ms");
+    for (let i = 0; i < flatAssignments.length; i += BATCH_LIMIT) {
+      const chunk = flatAssignments.slice(i, i + BATCH_LIMIT);
+      const batch = db.batch();
+
+      for (const a of chunk) {
+        const sub = a.submission || {};
+        const submitted = sub.submitted_at != null;
+        const graded = sub.score != null;
+
+        const docRef = db.collection("assignments").doc(String(a.id));
+        batch.set(docRef, {
+          course_id: a._courseId,
+          course_name: a._courseName,
+          submitted,
+          graded,
+          points: graded ? Number(sub.score) : 0,
+          max_points: Number(a.points_possible) || 0,
+          name: a.name || "(Unnamed assignment)",
+          due_date: a.due_at
+            ? admin.firestore.Timestamp.fromDate(new Date(a.due_at))
+            : null,
+          submission_date: sub.submitted_at
+            ? admin.firestore.Timestamp.fromDate(new Date(sub.submitted_at))
+            : null,
+          last_updated: now
+        }, { merge: true });
+
+        written++;
+      }
+
+      await withTimeout(batch.commit(), 15000, "firestore batch.commit");
+    }
+
+    console.log("[/refresh-assignments] DONE in", Date.now() - started, "ms —", written, "assignments");
     res.json({
       ok: true,
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString(),
-      totalAssignments,
-      totalPoints,
-      byCourse
+      assignments: written,
+      courses: courses.length,
+      last_updated: now.toDate().toISOString()
     });
   } catch (err) {
-    console.error("[/coursework-summary] ERROR after", Date.now() - started, "ms:", err?.message || err);
+    console.error("[/refresh-assignments] ERROR after", Date.now() - started, "ms:", err?.message || err);
     const status = err.status || 500;
     res.status(status).json({
       ok: false,

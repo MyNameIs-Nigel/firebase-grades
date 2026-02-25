@@ -14,11 +14,6 @@ import {
   onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-/**
- * Firebase config (existing)
- * NOTE: For production-hardening, consider moving this to environment config,
- * but preserving current behavior here.
- */
 const firebaseConfig = {
   apiKey: "AIzaSyBZ3wFUKHwC5HIQ-JQ2tADXqBhZ86inxY4",
   authDomain: "nigelsmith-pf.firebaseapp.com",
@@ -29,18 +24,14 @@ const firebaseConfig = {
   measurementId: "G-WSCD9M3L00"
 };
 
-// Existing backend base URL
 const BACKEND_BASE_URL = "https://grades-backend.ndsironwood.com";
 
-// Firebase init
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
 
-/* -----------------------------
- * UI refs (existing + new)
- * ----------------------------- */
+/* --- UI refs --- */
 const signInBtn = document.getElementById("signInBtn");
 const signOutBtn = document.getElementById("signOutBtn");
 const refreshBtn = document.getElementById("refreshBtn");
@@ -53,21 +44,20 @@ const toast = document.getElementById("toast");
 const spinner = document.getElementById("spinner");
 const refreshText = document.getElementById("refreshText");
 
-// NEW: shell toggles (main UI vs auth panel)
 const authShell = document.getElementById("authShell");
 const appShell = document.getElementById("appShell");
 
-// NEW: coursework summary controls
-const courseworkEndDate = document.getElementById("courseworkEndDate");
-const courseworkBtn = document.getElementById("courseworkBtn");
-const courseworkResult = document.getElementById("courseworkResult");
-const courseworkStatus = document.getElementById("courseworkStatus");
-const courseworkSpinner = document.getElementById("courseworkSpinner");
-const courseworkBtnText = document.getElementById("courseworkBtnText");
+// Assignments UI
+const refreshAssignmentsBtn = document.getElementById("refreshAssignmentsBtn");
+const assignmentsSpinner = document.getElementById("assignmentsSpinner");
+const assignmentsBtnText = document.getElementById("assignmentsBtnText");
+const coursePills = document.getElementById("coursePills");
+const assignmentsList = document.getElementById("assignmentsList");
+const assignmentsEmpty = document.getElementById("assignmentsEmpty");
+const assignmentCount = document.getElementById("assignmentCount");
+const assignmentsLastSynced = document.getElementById("assignmentsLastSynced");
 
-/* -----------------------------
- * Small UI helpers (existing + improved)
- * ----------------------------- */
+/* --- Small helpers --- */
 function showToast(msg) {
   toast.textContent = msg;
   toast.classList.remove("hidden");
@@ -81,10 +71,10 @@ function setLoading(isLoading) {
   refreshBtn.disabled = isLoading;
 }
 
-function setCourseworkLoading(isLoading) {
-  courseworkSpinner.classList.toggle("hidden", !isLoading);
-  courseworkBtnText.textContent = isLoading ? "Checking…" : "Check Coursework Load";
-  courseworkBtn.disabled = isLoading;
+function setAssignmentsLoading(isLoading) {
+  assignmentsSpinner.classList.toggle("hidden", !isLoading);
+  assignmentsBtnText.textContent = isLoading ? "Syncing…" : "Refresh Assignments";
+  refreshAssignmentsBtn.disabled = isLoading;
 }
 
 function fmtTimestamp(ts) {
@@ -107,7 +97,6 @@ function gradeStatus(grade, score) {
   return "bad";
 }
 
-// Fix: robust HTML escaping (prevents injection + rendering issues)
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (m) => ({
     "&": "&amp;",
@@ -118,9 +107,7 @@ function escapeHtml(str) {
   }[m]));
 }
 
-/* -----------------------------
- * Existing render: course cards
- * ----------------------------- */
+/* --- Grades rendering (unchanged) --- */
 const IGNORED_COURSE_NAMES = new Set(["cse majors", "mathematics majors"]);
 
 function renderCourses(docs) {
@@ -134,7 +121,6 @@ function renderCourses(docs) {
   }
   emptyState.classList.add("hidden");
 
-  // newest date_checked
   let newest = null;
   for (const d of docs) {
     const ts = d.date_checked;
@@ -173,10 +159,7 @@ function renderCourses(docs) {
   }
 }
 
-/* -----------------------------
- * Auth wiring
- * - Google SSO is wired here.
- * ----------------------------- */
+/* --- Auth wiring --- */
 signInBtn.addEventListener("click", async () => {
   try {
     await signInWithPopup(auth, provider);
@@ -195,11 +178,7 @@ signOutBtn.addEventListener("click", async () => {
   }
 });
 
-/* -----------------------------
- * Refresh button wiring (pattern preserved)
- * - Calls POST `${BACKEND_BASE_URL}/refresh`
- * - Uses Firebase ID token in Authorization header
- * ----------------------------- */
+/* --- Refresh grades button --- */
 refreshBtn.addEventListener("click", async () => {
   try {
     setLoading(true);
@@ -227,221 +206,254 @@ refreshBtn.addEventListener("click", async () => {
   }
 });
 
-/* -----------------------------
- * NEW: Coursework summary feature (Now → Selected Date)
- *
- * Backend endpoint (assumed):
- * POST `${BACKEND_BASE_URL}/coursework-summary`
- * Body: { startDate: <ISO>, endDate: <ISO> }
- * Response (proposed):
- * {
- *   totalAssignments: number,
- *   totalPoints: number,
- *   byCourse: [{ courseId, courseName, assignmentsCount, points }]
- * }
- * ----------------------------- */
-function toISOStartOfNow() {
-  return new Date().toISOString();
+/* =========================================
+ * Assignments — real-time from Firestore
+ * ========================================= */
+let allAssignments = [];
+let activeCourseFilter = null; // null = show all
+
+function tsToMs(ts) {
+  if (!ts) return null;
+  return ts.toMillis ? ts.toMillis() : new Date(ts).getTime();
 }
 
-function toISOEndOfDay(dateStr) {
-  // dateStr format: yyyy-mm-dd from <input type="date">
-  // Interpret as local end-of-day for user friendliness.
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const end = new Date(y, m - 1, d, 23, 59, 59, 999);
-  return end.toISOString();
-}
-
-function todayDateInputValue() {
+function fmtDateGroup(ts) {
+  if (!ts) return "No due date";
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
   const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const target = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+  if (target.getTime() === today.getTime()) return "Today";
+  if (target.getTime() === tomorrow.getTime()) return "Tomorrow";
+
+  return d.toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric"
+  });
 }
 
-function validateEndDate(dateStr) {
-  if (!dateStr) return { ok: false, message: "Please select a target date." };
+function dateKey(ts) {
+  if (!ts) return "9999-99-99";
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
-  // Compare date-only in local time
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const chosen = new Date(y, m - 1, d, 0, 0, 0, 0);
+function assignmentStatus(a) {
+  if (a.graded) return "graded";
+  if (a.submitted) return "submitted";
+  const dueMs = tsToMs(a.due_date);
+  if (dueMs && dueMs < Date.now()) return "overdue";
+  return "pending";
+}
 
-  const todayStr = todayDateInputValue();
-  const [ty, tm, td] = todayStr.split("-").map(Number);
-  const today = new Date(ty, tm - 1, td, 0, 0, 0, 0);
+function statusDotClass(status) {
+  if (status === "graded") return "good";
+  if (status === "submitted") return "ok";
+  if (status === "overdue") return "bad";
+  return "";
+}
 
-  if (chosen < today) {
-    return { ok: false, message: "Target date must be today or later." };
+function statusLabel(status) {
+  if (status === "graded") return "Graded";
+  if (status === "submitted") return "Submitted";
+  if (status === "overdue") return "Overdue";
+  return "Pending";
+}
+
+function renderCoursePills() {
+  coursePills.innerHTML = "";
+
+  const courseMap = new Map();
+  for (const a of allAssignments) {
+    if (!courseMap.has(a.course_id)) {
+      courseMap.set(a.course_id, a.course_name || `Course ${a.course_id}`);
+    }
   }
 
-  return { ok: true };
+  const allPill = document.createElement("button");
+  allPill.className = `course-pill${activeCourseFilter === null ? " active" : ""}`;
+  allPill.textContent = "All";
+  allPill.type = "button";
+  allPill.addEventListener("click", () => {
+    activeCourseFilter = null;
+    renderAssignments();
+  });
+  coursePills.appendChild(allPill);
+
+  const sorted = [...courseMap.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  for (const [courseId, courseName] of sorted) {
+    const pill = document.createElement("button");
+    pill.className = `course-pill${activeCourseFilter === courseId ? " active" : ""}`;
+    pill.textContent = courseName;
+    pill.type = "button";
+    pill.addEventListener("click", () => {
+      activeCourseFilter = courseId;
+      renderAssignments();
+    });
+    coursePills.appendChild(pill);
+  }
 }
 
-async function fetchCourseworkSummary({ startDateISO, endDateISO }) {
-  const user = auth.currentUser;
-  if (!user) throw new Error("Not signed in.");
+function renderAssignments() {
+  renderCoursePills();
 
-  const idToken = await user.getIdToken(false);
-  const res = await fetch(`${BACKEND_BASE_URL}/coursework-summary`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${idToken}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ startDate: startDateISO, endDate: endDateISO })
+  const filtered = activeCourseFilter != null
+    ? allAssignments.filter(a => a.course_id === activeCourseFilter)
+    : [...allAssignments];
+
+  filtered.sort((a, b) => {
+    const aMs = tsToMs(a.due_date) ?? Infinity;
+    const bMs = tsToMs(b.due_date) ?? Infinity;
+    return aMs - bMs;
   });
 
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "Failed to fetch coursework summary.");
-  return data;
-}
+  assignmentCount.textContent = String(filtered.length);
 
-function renderCourseworkSummary(data, endDateStr) {
-  courseworkResult.innerHTML = "";
+  let newestUpdate = null;
+  for (const a of allAssignments) {
+    const ms = tsToMs(a.last_updated);
+    if (ms && (newestUpdate == null || ms > newestUpdate.ms)) {
+      newestUpdate = { ms, ts: a.last_updated };
+    }
+  }
+  assignmentsLastSynced.textContent = newestUpdate ? fmtTimestamp(newestUpdate.ts) : "—";
 
-  const totalAssignments = Number(data?.totalAssignments ?? 0);
-  const totalPoints = Number(data?.totalPoints ?? 0);
-  const byCourse = Array.isArray(data?.byCourse) ? data.byCourse : [];
+  assignmentsList.innerHTML = "";
 
-  // Top-level summary card
-  const summary = document.createElement("div");
-  summary.className = "card";
-  summary.innerHTML = `
-    <h3>Summary</h3>
-    <div class="kv">
-      <span class="badge"><strong>Assignments:</strong> ${escapeHtml(totalAssignments)}</span>
-      <span class="badge"><strong>Total points:</strong> ${escapeHtml(totalPoints)}</span>
-      <span class="badge"><strong>Through:</strong> ${escapeHtml(endDateStr)}</span>
-    </div>
-    <div class="subtle" style="margin-top:10px">
-      Showing coursework due between now and the selected date.
-    </div>
-  `;
-  courseworkResult.appendChild(summary);
-
-  if (!byCourse.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty";
-    empty.style.marginTop = "12px";
-    empty.textContent = "No upcoming coursework found in that range.";
-    courseworkResult.appendChild(empty);
+  if (!filtered.length) {
+    assignmentsEmpty.classList.remove("hidden");
     return;
   }
+  assignmentsEmpty.classList.add("hidden");
 
-  // Per-course breakdown (consistent card styling)
-  const wrap = document.createElement("div");
-  wrap.className = "coursework-cards";
-
-  for (const c of byCourse) {
-    const courseName = c.courseName ?? "Untitled Course";
-    const assignmentsCount = Number(c.assignmentsCount ?? 0);
-    const points = Number(c.points ?? 0);
-
-    const card = document.createElement("div");
-    card.className = "card course";
-    card.innerHTML = `
-      <h3>${escapeHtml(courseName)}</h3>
-      <div class="kv">
-        <span class="badge"><strong>Assignments:</strong> ${escapeHtml(assignmentsCount)}</span>
-        <span class="badge"><strong>Points:</strong> ${escapeHtml(points)}</span>
-      </div>
-    `;
-
-    wrap.appendChild(card);
+  const groups = new Map();
+  for (const a of filtered) {
+    const key = dateKey(a.due_date);
+    if (!groups.has(key)) {
+      groups.set(key, { label: fmtDateGroup(a.due_date), items: [] });
+    }
+    groups.get(key).items.push(a);
   }
 
-  courseworkResult.appendChild(wrap);
+  for (const [, group] of groups) {
+    const header = document.createElement("div");
+    header.className = "date-group-header";
+    header.textContent = group.label;
+    assignmentsList.appendChild(header);
+
+    for (const a of group.items) {
+      const status = assignmentStatus(a);
+      const dotClass = statusDotClass(status);
+
+      let scoreHtml = "";
+      if (a.graded && a.max_points > 0) {
+        const pct = ((a.points / a.max_points) * 100).toFixed(1);
+        scoreHtml = `<span class="badge score-badge">${escapeHtml(a.points)}/${escapeHtml(a.max_points)} <span class="subtle">(${pct}%)</span></span>`;
+      } else if (a.graded) {
+        scoreHtml = `<span class="badge score-badge">${escapeHtml(a.points)} pts</span>`;
+      }
+
+      const showCourse = activeCourseFilter == null;
+      const metaParts = [];
+      if (showCourse && a.course_name) metaParts.push(escapeHtml(a.course_name));
+      metaParts.push(escapeHtml(statusLabel(status)));
+
+      const row = document.createElement("div");
+      row.className = `assignment-row status-${status}`;
+      row.innerHTML = `
+        <span class="dot ${dotClass}"></span>
+        <div class="assignment-info">
+          <div class="assignment-name">${escapeHtml(a.name)}</div>
+          <div class="assignment-meta">${metaParts.join('<span class="meta-sep"> · </span>')}</div>
+        </div>
+        <div class="assignment-score">${scoreHtml}</div>
+      `;
+
+      assignmentsList.appendChild(row);
+    }
+  }
 }
 
-// NEW: coursework button handler
-courseworkBtn.addEventListener("click", async () => {
+/* --- Refresh assignments button --- */
+refreshAssignmentsBtn.addEventListener("click", async () => {
   try {
-    setCourseworkLoading(true);
+    setAssignmentsLoading(true);
+    const user = auth.currentUser;
+    if (!user) throw new Error("Not signed in.");
 
-    const dateStr = courseworkEndDate.value;
-    const v = validateEndDate(dateStr);
-    if (!v.ok) throw new Error(v.message);
+    const idToken = await user.getIdToken(true);
+    const res = await fetch(`${BACKEND_BASE_URL}/refresh-assignments`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${idToken}`,
+        "Content-Type": "application/json"
+      }
+    });
 
-    courseworkStatus.textContent = "Checking coursework load…";
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) throw new Error(data.error || "Failed to refresh assignments.");
 
-    const startDateISO = toISOStartOfNow();
-    const endDateISO = toISOEndOfDay(dateStr);
-
-    // Backend call is made here
-    const data = await fetchCourseworkSummary({ startDateISO, endDateISO });
-
-    renderCourseworkSummary(data, dateStr);
-    courseworkStatus.textContent = `Loaded coursework load through ${dateStr}.`;
+    showToast(`Synced ${data.assignments} assignments from ${data.courses} courses.`);
   } catch (e) {
-    console.error("Coursework summary error:", e);
-    courseworkStatus.textContent = "Unable to load coursework summary.";
-    courseworkResult.innerHTML = "";
-    showToast(e?.message || "Failed to check coursework load.");
+    console.error("Refresh assignments error:", e);
+    showToast(e?.message || "Failed to refresh assignments.");
   } finally {
-    setCourseworkLoading(false);
+    setAssignmentsLoading(false);
   }
 });
 
-/* -----------------------------
- * Subscribe to Firestore when signed in (existing)
- * + Shell visibility toggles (NEW)
- * ----------------------------- */
-let unsubscribe = null;
+/* =========================================
+ * Auth state → subscriptions
+ * ========================================= */
+let unsubGrades = null;
+let unsubAssignments = null;
 
 onAuthStateChanged(auth, (user) => {
-  if (unsubscribe) {
-    unsubscribe();
-    unsubscribe = null;
-  }
+  if (unsubGrades) { unsubGrades(); unsubGrades = null; }
+  if (unsubAssignments) { unsubAssignments(); unsubAssignments = null; }
 
   const signedIn = !!user;
 
-  // Header actions
   signInBtn.classList.toggle("hidden", signedIn);
   signOutBtn.classList.toggle("hidden", !signedIn);
   refreshBtn.classList.toggle("hidden", !signedIn);
   userPill.classList.toggle("hidden", !signedIn);
-
-  // NEW: main app shell vs auth panel
   authShell.classList.toggle("hidden", signedIn);
   appShell.classList.toggle("hidden", !signedIn);
 
   if (!user) {
-    // Reset UI to signed-out state
     grid.innerHTML = "";
     emptyState.classList.add("hidden");
     lastChecked.textContent = "—";
     courseCount.textContent = "—";
     userPill.textContent = "";
 
-    courseworkEndDate.value = "";
-    courseworkResult.innerHTML = "";
-    courseworkStatus.textContent = "Select a date to estimate assignments/points due between now and then.";
+    allAssignments = [];
+    activeCourseFilter = null;
+    coursePills.innerHTML = "";
+    assignmentsList.innerHTML = "";
+    assignmentsEmpty.classList.add("hidden");
+    assignmentCount.textContent = "—";
+    assignmentsLastSynced.textContent = "—";
     return;
   }
 
-  // Signed in UI
   userPill.textContent = user.email || user.displayName || "Signed in";
 
-  // Initialize date input defaults once signed-in
-  const todayStr = todayDateInputValue();
-  courseworkEndDate.min = todayStr;
+  // Grades real-time listener
+  const gradesQ = query(collection(db, "grades"), orderBy("course_name"));
+  unsubGrades = onSnapshot(gradesQ, (snap) => {
+    renderCourses(snap.docs.map(d => d.data()));
+  });
 
-  if (!courseworkEndDate.value) {
-    // Default to 14 days out for convenience
-    const d = new Date();
-    d.setDate(d.getDate() + 14);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    courseworkEndDate.value = `${y}-${m}-${day}`;
-  }
-
-  // Existing grades subscription
-  const q = query(collection(db, "grades"), orderBy("course_name"));
-  unsubscribe = onSnapshot(q, (snap) => {
-    const docs = snap.docs.map((d) => d.data());
-    renderCourses(docs);
+  // Assignments real-time listener
+  const assignmentsRef = collection(db, "assignments");
+  unsubAssignments = onSnapshot(assignmentsRef, (snap) => {
+    allAssignments = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderAssignments();
   });
 });
