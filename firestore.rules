@@ -22,6 +22,12 @@ service cloud.firestore {
       allow write: if false; // server writes only
     }
 
+    // Only allow reads of assignments if allowlisted
+    match /assignments/{docId} {
+      allow read: if isAllowedEmail();
+      allow write: if false; // server writes only
+    }
+
     // Lock down allowlist docs from the client by default
     // (You can manage these via Firebase Console, Admin SDK, or a private admin tool)
     match /allowedEmails/{emailDocId} {
