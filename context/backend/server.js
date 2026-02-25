@@ -208,6 +208,16 @@ async function fetchAllCanvas(url, token) {
   return results;
 }
 
+// Courses that exist in Canvas but aren't real classes — skip them everywhere
+const IGNORED_COURSE_NAMES = new Set([
+  "cse majors",
+  "mathematics majors"
+]);
+
+function isIgnoredCourse(name) {
+  return IGNORED_COURSE_NAMES.has((name || "").trim().toLowerCase());
+}
+
 /** parse + validate ISO dates from request body */
 function parseISODateOrThrow(value, label) {
   if (!value || typeof value !== "string") {
@@ -283,12 +293,16 @@ app.post("/refresh", async (req, res) => {
     console.log("[/refresh] fetching Canvas courses...");
     const courses = await fetchAllCanvas(url, CANVAS_TOKEN);
     console.log("[/refresh] Canvas returned", courses.length, "courses");
+    const filteredCourses = courses.filter(c => !isIgnoredCourse(c.name));
+    if (filteredCourses.length !== courses.length) {
+      console.log("[/refresh] ignored", courses.length - filteredCourses.length, "non-class course(s)");
+    }
 
     const now = admin.firestore.Timestamp.now();
     const batch = db.batch();
     let updated = 0;
 
-    for (const c of courses) {
+    for (const c of filteredCourses) {
       const enrollment = Array.isArray(c.enrollments) ? c.enrollments[0] : null;
       const grade = enrollment?.computed_current_grade ?? null;
       const score = enrollment?.computed_current_score ?? null;
@@ -317,7 +331,7 @@ app.post("/refresh", async (req, res) => {
     console.log("[/refresh] DONE in", Date.now() - started, "ms");
     res.json({
       ok: true,
-      updated,
+      updated: filteredCourses.length,
       date_checked: now.toDate().toISOString()
     });
   } catch (err) {
@@ -367,7 +381,9 @@ app.post("/coursework-summary", async (req, res) => {
       `?enrollment_state=active&per_page=100`;
 
     console.log("[/coursework-summary] fetching Canvas courses...");
-    const courses = await fetchAllCanvas(coursesUrl, CANVAS_TOKEN);
+    const allCourses = await fetchAllCanvas(coursesUrl, CANVAS_TOKEN);
+    const courses = allCourses.filter(c => !isIgnoredCourse(c.name));
+    console.log("[/coursework-summary] using", courses.length, "of", allCourses.length, "courses (filtered non-class courses)");
 
     // Fetch assignments per course with a concurrency limit
     console.log("[/coursework-summary] fetching assignments per course...");

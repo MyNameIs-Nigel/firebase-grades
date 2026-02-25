@@ -121,7 +121,10 @@ function escapeHtml(str) {
 /* -----------------------------
  * Existing render: course cards
  * ----------------------------- */
+const IGNORED_COURSE_NAMES = new Set(["cse majors", "mathematics majors"]);
+
 function renderCourses(docs) {
+  docs = docs.filter(d => !IGNORED_COURSE_NAMES.has((d.course_name || "").trim().toLowerCase()));
   grid.innerHTML = "";
   if (!docs.length) {
     emptyState.classList.remove("hidden");
