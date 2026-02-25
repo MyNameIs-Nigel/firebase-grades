@@ -49,6 +49,7 @@ const appShell = document.getElementById("appShell");
 
 // Assignments UI
 const refreshAssignmentsBtn = document.getElementById("refreshAssignmentsBtn");
+const jumpTodayBtn = document.getElementById("jumpTodayBtn");
 const assignmentsSpinner = document.getElementById("assignmentsSpinner");
 const assignmentsBtnText = document.getElementById("assignmentsBtnText");
 const coursePills = document.getElementById("coursePills");
@@ -242,6 +243,15 @@ function dateKey(ts) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function dateHeaderId(key) {
+  return `date-${key}`;
+}
+
+function todayKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
 function assignmentStatus(a) {
   if (a.graded) return "graded";
   if (a.submitted) return "submitted";
@@ -340,8 +350,10 @@ function renderAssignments() {
   }
 
   for (const [, group] of groups) {
+    const groupKey = dateKey(group.items[0]?.due_date);
     const header = document.createElement("div");
     header.className = "date-group-header";
+    header.id = dateHeaderId(groupKey);
     header.textContent = group.label;
     assignmentsList.appendChild(header);
 
@@ -378,6 +390,31 @@ function renderAssignments() {
   }
 }
 
+function jumpToTodayOrNext() {
+  const headers = Array.from(assignmentsList.querySelectorAll(".date-group-header"));
+  if (!headers.length) {
+    showToast("No assignment dates to jump to.");
+    return;
+  }
+
+  const keys = headers
+    .map((h) => h.id.replace(/^date-/, ""))
+    .filter((k) => /^\d{4}-\d{2}-\d{2}$/.test(k))
+    .sort();
+
+  if (!keys.length) {
+    showToast("No dated assignments to jump to.");
+    return;
+  }
+
+  const today = todayKey();
+  const targetKey = keys.find((k) => k >= today) ?? keys[keys.length - 1];
+  const target = document.getElementById(dateHeaderId(targetKey));
+  if (!target) return;
+
+  target.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 /* --- Refresh assignments button --- */
 refreshAssignmentsBtn.addEventListener("click", async () => {
   try {
@@ -404,6 +441,10 @@ refreshAssignmentsBtn.addEventListener("click", async () => {
   } finally {
     setAssignmentsLoading(false);
   }
+});
+
+jumpTodayBtn.addEventListener("click", () => {
+  jumpToTodayOrNext();
 });
 
 /* =========================================
