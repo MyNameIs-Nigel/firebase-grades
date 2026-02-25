@@ -58,11 +58,11 @@ function escapeHtml(str) {
   }[m]));
 }
 
-async function apiCall(action, email) {
+async function apiCall(action, email, extra = {}) {
   const user = auth.currentUser;
   if (!user) throw new Error("Not signed in.");
   const idToken = await user.getIdToken(false);
-  const body = { action };
+  const body = { action, ...extra };
   if (email) body.email = email;
   const res = await fetch(`${BACKEND_BASE_URL}/admin/emails`, {
     method: "POST",
@@ -98,9 +98,35 @@ function renderEmails(emails) {
     li.className = "email-item";
     li.innerHTML = `
       <span>${escapeHtml(entry.email)}</span>
-      <button class="btn danger" type="button" data-email="${escapeHtml(entry.email)}">Remove</button>
+      <div class="item-controls">
+        <div class="toggle-wrap">
+          <span class="toggle-label">${entry.enabled ? "Enabled" : "Disabled"}</span>
+          <label class="toggle" title="${entry.enabled ? "Click to disable" : "Click to enable"}">
+            <input type="checkbox" ${entry.enabled ? "checked" : ""} />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <button class="btn danger" type="button">Remove</button>
+      </div>
     `;
-    li.querySelector("button").addEventListener("click", () => removeEmail(entry.email));
+    const checkbox = li.querySelector("input[type=checkbox]");
+    const label = li.querySelector(".toggle-label");
+    const toggleLabel = li.querySelector("label.toggle");
+    checkbox.addEventListener("change", async () => {
+      checkbox.disabled = true;
+      try {
+        await apiCall("toggle", entry.email, { enabled: checkbox.checked });
+        label.textContent = checkbox.checked ? "Enabled" : "Disabled";
+        toggleLabel.title = checkbox.checked ? "Click to disable" : "Click to enable";
+        showToast(`${entry.email} ${checkbox.checked ? "enabled" : "disabled"}`);
+      } catch (e) {
+        checkbox.checked = !checkbox.checked; // revert on failure
+        showError(e.message);
+      } finally {
+        checkbox.disabled = false;
+      }
+    });
+    li.querySelector(".btn.danger").addEventListener("click", () => removeEmail(entry.email));
     emailList.appendChild(li);
   }
 }

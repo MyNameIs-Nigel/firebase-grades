@@ -431,29 +431,40 @@ app.post("/admin/emails", async (req, res) => {
   console.log("[/admin/emails] START", new Date().toISOString());
 
   try {
+    console.log("[/admin/emails] verifying Firebase token...");
     const decoded = await requireFirebaseUser(req);
     const userEmail = (decoded.email || "").toLowerCase();
+    console.log("[/admin/emails] auth OK for", userEmail);
 
+    console.log("[/admin/emails] checking if user is admin (expecting", ADMIN_EMAIL_HARDCODED + ")");
     if (userEmail !== ADMIN_EMAIL_HARDCODED) {
+      console.log("[/admin/emails] DENIED: user", userEmail, "is not admin");
       return res.status(403).json({ ok: false, error: "Admin access only." });
     }
+    console.log("[/admin/emails] admin check PASSED");
 
     const { action, email } = req.body || {};
+    console.log("[/admin/emails] action:", action, "| email:", email);
 
     if (action === "list") {
+      console.log("[/admin/emails] listing allowed emails...");
       const snap = await db.collection("allowedEmails").get();
       const emails = snap.docs.map(doc => ({
         email: doc.id,
         enabled: doc.data()?.enabled ?? false
       }));
+      console.log("[/admin/emails] found", emails.length, "emails");
       return res.json({ ok: true, emails });
     }
 
     if (action === "add") {
+      console.log("[/admin/emails] add action");
       if (!email || typeof email !== "string" || !email.includes("@")) {
+        console.log("[/admin/emails] invalid email format:", email);
         return res.status(400).json({ ok: false, error: "Invalid email." });
       }
       const normalized = email.trim().toLowerCase();
+      console.log("[/admin/emails] adding email:", normalized);
       await db.collection("allowedEmails").doc(normalized).set({ enabled: true });
       allowCache.delete(normalized);
       console.log("[/admin/emails] added", normalized);
@@ -461,16 +472,36 @@ app.post("/admin/emails", async (req, res) => {
     }
 
     if (action === "remove") {
+      console.log("[/admin/emails] remove action");
       if (!email || typeof email !== "string") {
+        console.log("[/admin/emails] invalid email format:", email);
         return res.status(400).json({ ok: false, error: "Invalid email." });
       }
       const normalized = email.trim().toLowerCase();
+      console.log("[/admin/emails] removing email:", normalized);
       await db.collection("allowedEmails").doc(normalized).delete();
       allowCache.delete(normalized);
       console.log("[/admin/emails] removed", normalized);
       return res.json({ ok: true, removed: normalized });
     }
 
+    if (action === "toggle") {
+      console.log("[/admin/emails] toggle action");
+      if (!email || typeof email !== "string") {
+        return res.status(400).json({ ok: false, error: "Invalid email." });
+      }
+      const { enabled } = req.body || {};
+      if (typeof enabled !== "boolean") {
+        return res.status(400).json({ ok: false, error: "enabled must be a boolean." });
+      }
+      const normalized = email.trim().toLowerCase();
+      console.log("[/admin/emails] toggling", normalized, "->", enabled);
+      await db.collection("allowedEmails").doc(normalized).update({ enabled });
+      allowCache.delete(normalized);
+      return res.json({ ok: true, email: normalized, enabled });
+    }
+
+    console.log("[/admin/emails] unknown action:", action);
     return res.status(400).json({ ok: false, error: "Invalid action. Use list, add, or remove." });
   } catch (err) {
     console.error("[/admin/emails] ERROR after", Date.now() - started, "ms:", err?.message || err);
@@ -503,7 +534,7 @@ app.post("/deploy", async (req, res) => {
 
   console.log("[deploy] GitHub webhook received");
 
-  exec("git pull && npm install && pm2 restart grades-backend", (err, stdout, stderr) => {
+  exec("git pull && npm install && pm2 restart canvas-grades", (err, stdout, stderr) => {
     if (err) {
       console.error("[deploy] ERROR", err);
       return;

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend",
+      "runtimeExecutable": "/c/nvm4w/nodejs/npx",
+      "runtimeArgs": ["serve", "public", "--listen", "5000", "--no-clipboard"],
+      "port": 5000
+    }
+  ]
+}
