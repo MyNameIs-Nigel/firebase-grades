@@ -7,18 +7,15 @@ dns.setDefaultResultOrder("ipv4first");
 
 /**
  * ENV VARS (set on the server)
- * - CANVAS_BASE_URL = https://byui.instructure.com
- * - CANVAS_TOKEN = <canvas token>
- * - ADMIN_EMAIL = <your email>
+ * - CANVAS_BASE_URL  = https://byui.instructure.com   (primary / byui)
+ * - CANVAS_TOKEN     = <canvas token>
+ * - CANVAS2_BASE_URL = <second canvas instance URL>    (optional)
+ * - CANVAS2_TOKEN    = <second canvas token>           (optional)
+ * - ADMIN_EMAIL      = <your email>
  * - FIREBASE_SERVICE_ACCOUNT_JSON = <service account json string>
  * - PORT = 8080 (optional)
  */
-const {
-  CANVAS_BASE_URL,
-  CANVAS_TOKEN,
-  FIREBASE_SERVICE_ACCOUNT_JSON,
-  PORT
-} = process.env;
+const { FIREBASE_SERVICE_ACCOUNT_JSON, PORT } = process.env;
 
 function requireEnv(name) {
   if (!process.env[name]) throw new Error(`Missing required env var: ${name}`);
@@ -28,6 +25,18 @@ requireEnv("CANVAS_BASE_URL");
 requireEnv("CANVAS_TOKEN");
 requireEnv("ADMIN_EMAIL");
 requireEnv("FIREBASE_SERVICE_ACCOUNT_JSON");
+
+// Each entry: { label, baseUrl, token }
+const CANVAS_INSTANCES = [
+  { label: "byui", baseUrl: process.env.CANVAS_BASE_URL, token: process.env.CANVAS_TOKEN }
+];
+
+if (process.env.CANVAS2_BASE_URL && process.env.CANVAS2_TOKEN) {
+  CANVAS_INSTANCES.push({ label: "canvas", baseUrl: process.env.CANVAS2_BASE_URL, token: process.env.CANVAS2_TOKEN });
+  console.log("[init] 2 Canvas instances configured: byui, canvas");
+} else {
+  console.log("[init] 1 Canvas instance configured: byui");
+}
 
 // --------------------
 // Firebase Admin init
@@ -236,11 +245,11 @@ async function mapLimit(items, limit, asyncFn) {
 }
 
 /** fetch all assignments for a course, including submission data */
-async function fetchCourseAssignments(courseId) {
+async function fetchCourseAssignments(courseId, baseUrl, token) {
   const url =
-    `${CANVAS_BASE_URL}/api/v1/courses/${courseId}/assignments` +
+    `${baseUrl}/api/v1/courses/${courseId}/assignments` +
     `?per_page=100&include[]=submission`;
-  return fetchAllCanvas(url, CANVAS_TOKEN);
+  return fetchAllCanvas(url, token);
 }
 
 // --------------------
@@ -256,24 +265,30 @@ app.post("/refresh", async (req, res) => {
     const user = await requireFirebaseUser(req);
     console.log("[/refresh] auth OK for", user.email);
 
-    // Canvas API: active courses + total scores
-    const url =
-      `${CANVAS_BASE_URL}/api/v1/courses` +
-      `?enrollment_state=active&include[]=total_scores&per_page=100`;
+    let allFilteredCourses = [];
 
-    console.log("[/refresh] fetching Canvas courses...");
-    const courses = await fetchAllCanvas(url, CANVAS_TOKEN);
-    console.log("[/refresh] Canvas returned", courses.length, "courses");
-    const filteredCourses = courses.filter(c => !isIgnoredCourse(c.id));
-    if (filteredCourses.length !== courses.length) {
-      console.log("[/refresh] ignored", courses.length - filteredCourses.length, "non-class course(s)");
+    for (const inst of CANVAS_INSTANCES) {
+      const url =
+        `${inst.baseUrl}/api/v1/courses` +
+        `?enrollment_state=active&include[]=total_scores&per_page=100`;
+
+      console.log(`[/refresh] fetching courses from ${inst.label}...`);
+      const courses = await fetchAllCanvas(url, inst.token);
+      console.log(`[/refresh] ${inst.label} returned`, courses.length, "courses");
+      const filtered = courses.filter(c => !isIgnoredCourse(c.id));
+      if (filtered.length !== courses.length) {
+        console.log(`[/refresh] ${inst.label}: ignored`, courses.length - filtered.length, "non-class course(s)");
+      }
+      allFilteredCourses = allFilteredCourses.concat(filtered);
     }
+
+    console.log("[/refresh] total courses across all instances:", allFilteredCourses.length);
 
     const now = admin.firestore.Timestamp.now();
     const batch = db.batch();
     let updated = 0;
 
-    for (const c of filteredCourses) {
+    for (const c of allFilteredCourses) {
       const enrollment = Array.isArray(c.enrollments) ? c.enrollments[0] : null;
       const grade = enrollment?.computed_current_grade ?? null;
       const score = enrollment?.computed_current_score ?? null;
@@ -302,7 +317,7 @@ app.post("/refresh", async (req, res) => {
     console.log("[/refresh] DONE in", Date.now() - started, "ms");
     res.json({
       ok: true,
-      updated: filteredCourses.length,
+      updated: allFilteredCourses.length,
       date_checked: now.toDate().toISOString()
     });
   } catch (err) {
@@ -332,21 +347,32 @@ app.post("/refresh-assignments", async (req, res) => {
     const user = await requireFirebaseUser(req);
     console.log("[/refresh-assignments] auth OK for", user.email);
 
-    const coursesUrl =
-      `${CANVAS_BASE_URL}/api/v1/courses` +
-      `?enrollment_state=active&per_page=100`;
+    // Collect { course, inst } pairs from all Canvas instances
+    const courseEntries = [];
 
-    console.log("[/refresh-assignments] fetching Canvas courses...");
-    const allCourses = await fetchAllCanvas(coursesUrl, CANVAS_TOKEN);
-    const courses = allCourses.filter(c => !isIgnoredCourse(c.id));
-    console.log("[/refresh-assignments] using", courses.length, "of", allCourses.length, "courses");
+    for (const inst of CANVAS_INSTANCES) {
+      const coursesUrl =
+        `${inst.baseUrl}/api/v1/courses` +
+        `?enrollment_state=active&per_page=100`;
 
+      console.log(`[/refresh-assignments] fetching courses from ${inst.label}...`);
+      const raw = await fetchAllCanvas(coursesUrl, inst.token);
+      const filtered = raw.filter(c => !isIgnoredCourse(c.id));
+      console.log(`[/refresh-assignments] ${inst.label}: using ${filtered.length} of ${raw.length} courses`);
+
+      for (const course of filtered) {
+        courseEntries.push({ course, inst });
+      }
+    }
+
+    console.log("[/refresh-assignments] total courses across all instances:", courseEntries.length);
     console.log("[/refresh-assignments] fetching assignments per course...");
-    const perCourse = await mapLimit(courses, 5, async (course) => {
+
+    const perCourse = await mapLimit(courseEntries, 5, async ({ course, inst }) => {
       const assignments = await withTimeout(
-        fetchCourseAssignments(course.id),
+        fetchCourseAssignments(course.id, inst.baseUrl, inst.token),
         20000,
-        `assignments(course ${course.id})`
+        `assignments(${inst.label}/course ${course.id})`
       );
       return assignments.map(a => ({
         ...a,
@@ -399,7 +425,7 @@ app.post("/refresh-assignments", async (req, res) => {
     res.json({
       ok: true,
       assignments: written,
-      courses: courses.length,
+      courses: courseEntries.length,
       last_updated: now.toDate().toISOString()
     });
   } catch (err) {
