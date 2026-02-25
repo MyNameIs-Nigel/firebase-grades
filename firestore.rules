@@ -1,0 +1,31 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ✅ Helper: only signed-in users
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // ✅ Helper: check allowlist doc allowedEmails/{email}
+    function isAllowedEmail() {
+      // normalize email to lowercase
+      let email = request.auth.token.email;
+      return isSignedIn()
+        && email != null
+        && get(/databases/$(database)/documents/allowedEmails/$(email.lower())).data.enabled == true;
+    }
+
+    // Only allow reads of grades if allowlisted
+    match /grades/{docId} {
+      allow read: if isAllowedEmail();
+      allow write: if false; // server writes only
+    }
+
+    // 🔒 Lock down allowlist docs from the client by default
+    // (You can manage these via Firebase Console, Admin SDK, or a private admin tool)
+    match /allowedEmails/{emailDocId} {
+      allow read, write: if false;
+    }
+  }
+}
