@@ -158,7 +158,7 @@ async function requireFirebaseUser(req) {
 
   const allowed = await withTimeout(
     isEmailAllowed(email),
-    4000,
+    10000,
     "isEmailAllowed"
   );
 
