@@ -551,7 +551,7 @@ app.post("/deploy", async (req, res) => {
 
   console.log("[deploy] GitHub webhook received");
 
-  exec("git pull && npm install && pm2 restart canvas-grades", (err, stdout, stderr) => {
+  exec("git pull && npm install && pm2 restart firebase-grades", (err, stdout, stderr) => {
     if (err) {
       console.error("[deploy] ERROR", err);
       return;
