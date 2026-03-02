@@ -63,7 +63,7 @@ GITHUB_WEBHOOK_SECRET=<secret>   # optional, only needed for /deploy
 node server.js
 ```
 
-On the home server, the process is managed by pm2 under the name `grades-backend`.
+On the home server, the process is managed by pm2 under the name `firebase-grades`.
 
 ## Deploying the Frontend
 
