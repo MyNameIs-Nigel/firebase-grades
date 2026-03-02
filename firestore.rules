@@ -28,6 +28,15 @@ service cloud.firestore {
       allow write: if false; // server writes only
     }
 
+    // Semester grades — client read/write for allowed users (GPA populate tool)
+    match /semesterGrades/{semesterId} {
+      allow read, write: if isAllowedEmail();
+
+      match /classes/{classId} {
+        allow read, write: if isAllowedEmail();
+      }
+    }
+
     // Lock down allowlist docs from the client by default
     // (You can manage these via Firebase Console, Admin SDK, or a private admin tool)
     match /allowedEmails/{emailDocId} {

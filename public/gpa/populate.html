@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GPA — Populate Transcript</title>
+  <link rel="stylesheet" href="../styles.css">
+  <style>
+    .semester-row{ display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
+    .semester-row select, .semester-row input[type="number"]{
+      height:40px; padding:0 12px;
+      border-radius:12px;
+      border:1px solid var(--border);
+      background:rgba(16,26,51,.6);
+      color:var(--text);
+      font-size:14px;
+    }
+    .semester-row select{ min-width:140px; }
+    .semester-row input[type="number"]{ width:100px; }
+
+    .semester-pills{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+    .semester-status{ margin-top:12px; font-size:13px; color:var(--muted); }
+
+    .class-entry{
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:rgba(255,255,255,.03);
+      padding:14px;
+      margin-bottom:10px;
+    }
+    .class-row-top, .class-row-bottom{
+      display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;
+    }
+    .class-row-bottom{ margin-top:10px; }
+    .field{ display:flex; flex-direction:column; }
+    .field-grow{ flex:1; min-width:180px; }
+    .input{
+      height:40px; padding:0 12px;
+      border-radius:12px;
+      border:1px solid var(--border);
+      background:rgba(16,26,51,.6);
+      color:var(--text);
+      font-size:14px;
+    }
+    select.input{ cursor:pointer; }
+    .input:focus{ outline:none; border-color:rgba(106,166,255,.5); }
+    .field-check{
+      display:flex; align-items:flex-end; padding-bottom:8px;
+    }
+    .check-label{
+      display:flex; align-items:center; gap:8px;
+      cursor:pointer; font-size:14px; color:var(--muted);
+      user-select:none;
+    }
+    .check-label input[type="checkbox"]{
+      width:18px; height:18px; accent-color:var(--primary);
+      cursor:pointer;
+    }
+    .remove-btn{ height:40px; padding:0 14px; flex-shrink:0; font-size:16px; }
+
+    .form-actions{ display:flex; gap:10px; flex-wrap:wrap; margin-top:16px; }
+    .error-msg{ color:var(--danger); margin-top:12px; font-size:14px; }
+
+    @media (max-width:620px){
+      .class-row-top, .class-row-bottom{ flex-direction:column; align-items:stretch; }
+      .field-grow{ min-width:0; }
+      .remove-btn{ align-self:flex-end; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <div class="header-row">
+        <div class="brand">
+          <h1>GPA — Populate Transcript</h1>
+          <p><a href="../index.html">Back to Grades</a></p>
+        </div>
+        <div class="actions">
+          <span id="userPill" class="pill hidden"></span>
+          <button id="signInBtn" class="btn primary" type="button">
+            <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+              <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.2 6.1 29.4 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.2-.4-3.5z"/>
+              <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.2 6.1 29.4 4 24 4c-7.7 0-14.4 4.3-17.7 10.7z"/>
+              <path fill="#4CAF50" d="M24 44c5.2 0 10-2 13.6-5.2l-6.3-5.2C29.2 35.2 26.7 36 24 36c-5.3 0-9.8-3.4-11.3-8.1l-6.5 5C9.5 39.5 16.2 44 24 44z"/>
+              <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-1.2 3.1-3.7 5.6-7 6.6l6.3 5.2C36.8 38 44 34 44 24c0-1.3-.1-2.2-.4-3.5z"/>
+            </svg>
+            Sign in with Google
+          </button>
+          <button id="signOutBtn" class="btn danger hidden" type="button">Sign out</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section id="authShell" class="auth-panel">
+      <div class="card">
+        <h2 style="margin:0 0 8px; font-size:16px;">Sign in to populate transcript data</h2>
+        <p class="muted-block" style="margin:0;">Only the admin account can access this page.</p>
+      </div>
+    </section>
+
+    <div id="appShell" class="hidden">
+      <!-- Existing semesters -->
+      <div class="card" style="margin-top:18px;">
+        <h3>Existing Semesters</h3>
+        <div id="semesterPills" class="semester-pills" style="margin-top:12px;">
+          <span class="subtle">Loading…</span>
+        </div>
+      </div>
+
+      <!-- Semester selector -->
+      <div class="card" style="margin-top:14px;">
+        <h3>Select Semester</h3>
+        <div class="semester-row" style="margin-top:10px;">
+          <div class="field">
+            <label for="season">Season</label>
+            <select id="season" class="input">
+              <option value="">— Pick —</option>
+              <option value="WINTER">WINTER</option>
+              <option value="SPRING">SPRING</option>
+              <option value="SUMMER">SUMMER</option>
+              <option value="FALL">FALL</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="year">Year</label>
+            <input id="year" type="number" min="2000" max="2099" placeholder="2025" />
+          </div>
+          <button id="loadBtn" class="btn primary" type="button">Load</button>
+        </div>
+        <div id="semesterStatus" class="semester-status hidden"></div>
+      </div>
+
+      <!-- Classes -->
+      <div class="card" style="margin-top:14px;">
+        <h3>Classes</h3>
+        <div id="classesContainer" style="margin-top:12px;"></div>
+        <button id="addClassBtn" class="btn" type="button" style="margin-top:8px;">+ Add Class</button>
+        <div class="form-actions">
+          <button id="submitBtn" class="btn primary" type="button">Save Semester</button>
+          <button id="deleteSemesterBtn" class="btn danger hidden" type="button">Delete Semester</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div id="toast" class="hidden" role="status" aria-live="polite"></div>
+
+  <script type="module" src="./populate.js"></script>
+</body>
+</html>
