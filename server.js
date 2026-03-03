@@ -136,10 +136,25 @@ async function isEmailAllowed(email) {
 
 
 /**
+ * Check if request originates from localhost (for cron.js calls).
+ */
+function isLocalhostRequest(req) {
+  const addr = req.socket?.remoteAddress || "";
+  return addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1";
+}
+
+/**
  * Verify Firebase ID token (sent from browser),
  * AND restrict access to only your email.
+ * Localhost requests (from cron.js) bypass auth.
  */
 async function requireFirebaseUser(req) {
+  // Allow localhost requests without auth (for cron.js)
+  if (isLocalhostRequest(req) && !req.headers.authorization) {
+    console.log("[auth] localhost request — skipping token verification");
+    return { email: "localhost-cron", uid: "localhost" };
+  }
+
   const header = req.headers.authorization || "";
   const match = header.match(/^Bearer (.+)$/);
   if (!match) {
@@ -169,7 +184,6 @@ async function requireFirebaseUser(req) {
   }
 
   return decoded;
-  
 }
 
 /**
@@ -551,7 +565,7 @@ app.post("/deploy", async (req, res) => {
 
   console.log("[deploy] GitHub webhook received");
 
-  exec("git pull && npm install && pm2 restart firebase-grades", (err, stdout, stderr) => {
+  exec("git pull && npm install && pm2 restart firebase-grades && pm2 restart firebase-grades-cron", (err, stdout, stderr) => {
     if (err) {
       console.error("[deploy] ERROR", err);
       return;
