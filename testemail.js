@@ -18,7 +18,7 @@ const resend = new Resend(RESEND_API_KEY);
 console.log(`Sending test email to ${ADMIN_EMAIL}...`);
 
 const { data, error } = await resend.emails.send({
-  from: "Grades Alert <onboarding@resend.dev>",
+  from: "Grades Alert <nigel@mail.fullcoverage.tech>",
   to: [ADMIN_EMAIL],
   subject: "Test email from firebase-grades",
   text: "This is a test email to confirm Resend delivery is working correctly.",

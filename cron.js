@@ -120,7 +120,7 @@ async function checkDueSoon() {
     console.log("[cron] sending due-soon email for", newAlerts.length, "assignment(s)");
 
     const { error } = await resend.emails.send({
-      from: "Grades Alert <onboarding@resend.dev>",
+      from: "Grades Alert <nigel@mail.fullcoverage.tech>",
       to: [ADMIN_EMAIL],
       subject: `⚠️ ${newAlerts.length} assignment(s) due within 4 hours`,
       text: body,
