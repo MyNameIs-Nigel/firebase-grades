@@ -8,10 +8,11 @@ import { Resend } from "resend";
  *   ADMIN_EMAIL   — recipient for the test email
  */
 
-const { RESEND_API_KEY, ADMIN_EMAIL } = process.env;
+const { RESEND_API_KEY } = process.env;
 
 if (!RESEND_API_KEY) throw new Error("Missing RESEND_API_KEY");
-if (!ADMIN_EMAIL) throw new Error("Missing ADMIN_EMAIL");
+
+const ADMIN_EMAIL = "nigel.nds.smith@gmail.com";
 
 const resend = new Resend(RESEND_API_KEY);
 

@@ -18,13 +18,13 @@ import { Resend } from "resend";
 const {
   FIREBASE_SERVICE_ACCOUNT_JSON,
   RESEND_API_KEY,
-  ADMIN_EMAIL,
   BACKEND_PORT
 } = process.env;
 
 if (!FIREBASE_SERVICE_ACCOUNT_JSON) throw new Error("Missing FIREBASE_SERVICE_ACCOUNT_JSON");
 if (!RESEND_API_KEY) throw new Error("Missing RESEND_API_KEY");
-if (!ADMIN_EMAIL) throw new Error("Missing ADMIN_EMAIL");
+
+const ADMIN_EMAIL = "nigel.nds.smith@gmail.com";
 
 // --------------------
 // Firebase Admin init
