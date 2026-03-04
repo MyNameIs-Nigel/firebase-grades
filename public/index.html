@@ -13,8 +13,13 @@
       <div class="header-row">
         <div class="brand">
           <h1>Nigel Smith's Canvas Grades</h1>
-          <p>Firebase Auth + Node.js backend</p>
         </div>
+
+        <nav class="nav-links" id="navLinks">
+          <a href="/index.html" class="active" aria-current="page">Grades</a>
+          <a href="/gpa/index.html">GPA Calculator</a>
+          <a id="adminLink" href="/admin.html" class="hidden">Email Admin</a>
+        </nav>
 
         <div class="actions" aria-label="Account and actions">
           <span id="userPill" class="pill hidden" aria-live="polite"></span>
@@ -31,12 +36,6 @@
           </button>
 
           <button id="signOutBtn" class="btn danger hidden" type="button">Sign out</button>
-
-          <!-- Refresh grades -->
-          <button id="refreshBtn" class="btn primary hidden" type="button">
-            <span id="spinner" class="spinner hidden" aria-hidden="true"></span>
-            <span id="refreshText">Refresh</span>
-          </button>
         </div>
       </div>
     </div>
@@ -69,6 +68,12 @@
               <span aria-hidden="true"> • </span>
               <span>Last checked: <strong id="lastChecked">—</strong></span>
             </div>
+          </div>
+          <div class="section-actions">
+            <button id="refreshBtn" class="btn primary hidden" type="button">
+              <span id="spinner" class="spinner hidden" aria-hidden="true"></span>
+              <span id="refreshText">Refresh</span>
+            </button>
           </div>
         </div>
 

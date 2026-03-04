@@ -36,6 +36,12 @@ header{
 .brand{ display:flex; flex-direction:column; gap:2px; min-width:180px; }
 .brand h1{ font-size:18px; margin:0; letter-spacing:.2px; }
 .brand p{ margin:0; color:var(--muted); font-size:13px; }
+.nav-links{ display:flex; gap:18px; align-items:center; }
+.nav-links a{
+  color:var(--muted); text-decoration:none; font-size:14px; font-weight:500;
+  transition:color .15s;
+}
+.nav-links a:hover, .nav-links a.active{ color:var(--text); }
 .actions{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
 .pill{
   display:inline-flex; align-items:center; gap:8px;
@@ -105,6 +111,7 @@ main{ padding: 18px 0 40px; }
 @media (max-width: 620px){
   .grid{ grid-template-columns: 1fr; }
   .header-row{ flex-direction:column; align-items:stretch; }
+  .nav-links{ gap:14px; }
   .actions{ justify-content:flex-start; }
 }
 .hidden{ display:none !important; }

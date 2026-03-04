@@ -466,6 +466,12 @@ onAuthStateChanged(auth, (user) => {
   authShell.classList.toggle("hidden", signedIn);
   appShell.classList.toggle("hidden", !signedIn);
 
+  const adminLink = document.getElementById("adminLink");
+  if (adminLink) {
+    adminLink.classList.toggle("hidden",
+      !user || (user.email || "").toLowerCase() !== "smi23081@byui.edu");
+  }
+
   if (!user) {
     grid.innerHTML = "";
     emptyState.classList.add("hidden");
