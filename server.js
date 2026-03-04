@@ -426,6 +426,7 @@ app.post("/refresh-assignments", async (req, res) => {
           submission_date: sub.submitted_at
             ? admin.firestore.Timestamp.fromDate(new Date(sub.submitted_at))
             : null,
+          notified: false,
           last_updated: now
         }, { merge: true });
 

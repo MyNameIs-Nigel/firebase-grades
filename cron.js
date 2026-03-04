@@ -43,8 +43,7 @@ const resend = new Resend(RESEND_API_KEY);
 const port = Number(BACKEND_PORT || 8080);
 const BACKEND_URL = `http://localhost:${port}`;
 
-// Track which assignments we've already notified about (to avoid spam)
-const notifiedAssignments = new Set();
+
 
 // --------------------
 // Job 1: Refresh assignments every 2 hours
@@ -79,6 +78,7 @@ async function checkDueSoon() {
     const snap = await db
       .collection("assignments")
       .where("submitted", "==", false)
+      .where("notified", "==", false)
       .where("due_date", "!=", null)
       .where("due_date", ">", admin.firestore.Timestamp.fromDate(now))
       .where("due_date", "<=", admin.firestore.Timestamp.fromDate(fourHoursFromNow))
@@ -89,18 +89,7 @@ async function checkDueSoon() {
       return;
     }
 
-    // Filter out already-notified assignments
-    const newAlerts = [];
-    for (const doc of snap.docs) {
-      if (!notifiedAssignments.has(doc.id)) {
-        newAlerts.push({ id: doc.id, ...doc.data() });
-      }
-    }
-
-    if (newAlerts.length === 0) {
-      console.log("[cron] all due-soon assignments already notified");
-      return;
-    }
+    const newAlerts = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 
     // Build email body
     const lines = newAlerts.map((a) => {
@@ -131,12 +120,14 @@ async function checkDueSoon() {
       return;
     }
 
-    // Mark as notified
+    // Mark as notified in Firestore
+    const batch = db.batch();
     for (const a of newAlerts) {
-      notifiedAssignments.add(a.id);
+      batch.update(db.collection("assignments").doc(a.id), { notified: true });
     }
+    await batch.commit();
 
-    console.log("[cron] email sent successfully");
+    console.log("[cron] email sent successfully, marked", newAlerts.length, "assignment(s) as notified");
   } catch (err) {
     console.error("[cron] due-soon check error:", err.message);
   }
