@@ -97,12 +97,18 @@ async function checkDueSoon() {
       const dueStr = due
         ? due.toLocaleString("en-US", { timeZone: "America/Boise" })
         : "unknown";
-      return `• ${a.name} (${a.course_name}) — due ${dueStr}`;
+      return [
+        `Assignment ID: ${a.id}`,
+        `Name:          ${a.name}`,
+        `Due:           ${dueStr}`,
+        `Course:        ${a.course_name}`,
+        `Points:        ${a.max_points ?? 0}`,
+      ].join("\n");
     });
 
     const body = [
       `You have ${newAlerts.length} unsubmitted assignment(s) due within 4 hours:\n`,
-      ...lines,
+      lines.join("\n\n"),
       `\nCheck Canvas and submit before the deadline!`,
     ].join("\n");
 
