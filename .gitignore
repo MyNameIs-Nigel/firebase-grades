@@ -70,3 +70,5 @@ node_modules/
 
 # Ignore Context files
 context/backend/*.json
+
+firebase-admin.json

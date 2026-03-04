@@ -1,21 +1,28 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import admin from "firebase-admin";
 import dns from "node:dns";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 dns.setDefaultResultOrder("ipv4first");
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 /**
- * ENV VARS (set on the server)
+ * ENV VARS (loaded from .env file via dotenv)
  * - CANVAS_BASE_URL  = https://byui.instructure.com   (primary / byui)
  * - CANVAS_TOKEN     = <canvas token>
  * - CANVAS2_BASE_URL = <second canvas instance URL>    (optional)
  * - CANVAS2_TOKEN    = <second canvas token>           (optional)
  * - ADMIN_EMAIL      = <your email>
- * - FIREBASE_SERVICE_ACCOUNT_JSON = <service account json string>
  * - PORT = 8080 (optional)
+ *
+ * Firebase credentials are read from firebase-admin.json in the project root.
  */
-const { FIREBASE_SERVICE_ACCOUNT_JSON, PORT } = process.env;
+const { PORT } = process.env;
 
 function requireEnv(name) {
   if (!process.env[name]) throw new Error(`Missing required env var: ${name}`);
@@ -24,7 +31,6 @@ function requireEnv(name) {
 requireEnv("CANVAS_BASE_URL");
 requireEnv("CANVAS_TOKEN");
 requireEnv("ADMIN_EMAIL");
-requireEnv("FIREBASE_SERVICE_ACCOUNT_JSON");
 
 // Each entry: { label, baseUrl, token }
 const CANVAS_INSTANCES = [
@@ -41,7 +47,9 @@ if (process.env.CANVAS2_BASE_URL && process.env.CANVAS2_TOKEN) {
 // --------------------
 // Firebase Admin init
 // --------------------
-const serviceAccount = JSON.parse(FIREBASE_SERVICE_ACCOUNT_JSON);
+const serviceAccount = JSON.parse(
+  readFileSync(join(__dirname, "firebase-admin.json"), "utf8")
+);
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });

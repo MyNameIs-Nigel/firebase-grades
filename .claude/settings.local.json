@@ -5,7 +5,8 @@
       "Bash(node --version:*)",
       "Bash(cmd /c:*)",
       "Bash(node:*)",
-      "Bash(ssh:*)"
+      "Bash(ssh:*)",
+      "Bash(npm install dotenv)"
     ]
   }
 }

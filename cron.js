@@ -1,6 +1,12 @@
+import "dotenv/config";
 import cron from "node-cron";
 import admin from "firebase-admin";
 import { Resend } from "resend";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
  * Cron jobs for firebase-grades:
@@ -8,20 +14,18 @@ import { Resend } from "resend";
  * 2) Check for unsubmitted assignments due within 4 hours every 15 minutes,
  *    and send email notifications via Resend
  *
- * Required env vars:
- *   FIREBASE_SERVICE_ACCOUNT_JSON — Firebase Admin credentials
+ * Env vars loaded from .env file via dotenv:
  *   RESEND_API_KEY               — Resend email API key
- *   ADMIN_EMAIL                  — recipient for due-soon notifications
  *   BACKEND_PORT                 — port the backend runs on (default 8080)
+ *
+ * Firebase credentials are read from firebase-admin.json in the project root.
  */
 
 const {
-  FIREBASE_SERVICE_ACCOUNT_JSON,
   RESEND_API_KEY,
   BACKEND_PORT
 } = process.env;
 
-if (!FIREBASE_SERVICE_ACCOUNT_JSON) throw new Error("Missing FIREBASE_SERVICE_ACCOUNT_JSON");
 if (!RESEND_API_KEY) throw new Error("Missing RESEND_API_KEY");
 
 const ADMIN_EMAIL = "nigel.nds.smith@gmail.com";
@@ -29,7 +33,9 @@ const ADMIN_EMAIL = "nigel.nds.smith@gmail.com";
 // --------------------
 // Firebase Admin init
 // --------------------
-const serviceAccount = JSON.parse(FIREBASE_SERVICE_ACCOUNT_JSON);
+const serviceAccount = JSON.parse(
+  readFileSync(join(__dirname, "firebase-admin.json"), "utf8")
+);
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
