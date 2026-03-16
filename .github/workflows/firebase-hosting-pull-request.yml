@@ -14,7 +14,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: FirebaseExtended/action-hosting-deploy@v0
+        id: deploy
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_NIGELSMITH_PF }}
           projectId: nigelsmith-pf
+      - uses: sarisia/actions-status-discord@v1
+        if: always()
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          title: "Firebase Hosting Preview"
+          description: |
+            **PR:** ${{ github.event.pull_request.title }}
+            **Branch:** `${{ github.head_ref }}` → `${{ github.base_ref }}`
+            **Triggered by:** ${{ github.actor }}
+            **Preview URL:** ${{ steps.deploy.outputs.details_url }}
+          url: ${{ github.event.pull_request.html_url }}
+          username: GitHub Actions

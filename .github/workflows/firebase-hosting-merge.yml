@@ -12,8 +12,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: FirebaseExtended/action-hosting-deploy@v0
+        id: deploy
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_NIGELSMITH_PF }}
           channelId: live
           projectId: nigelsmith-pf
+      - uses: sarisia/actions-status-discord@v1
+        if: always()
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          title: "Deploy to Firebase Hosting"
+          description: |
+            **Commit:** ${{ github.event.head_commit.message }}
+            **Branch:** `${{ github.ref_name }}`
+            **Triggered by:** ${{ github.actor }}
+            **Live URL:** https://grades.ndsironwood.com
+          url: ${{ github.event.head_commit.url }}
+          username: GitHub Actions
