@@ -29,4 +29,4 @@ jobs:
             **Triggered by:** ${{ github.actor }}
             **Live URL:** https://grades.ndsironwood.com
           url: ${{ github.event.head_commit.url }}
-          username: GitHub Actions
+          username: Firebase Grades

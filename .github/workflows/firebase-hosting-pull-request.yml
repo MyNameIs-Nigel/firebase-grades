@@ -30,4 +30,4 @@ jobs:
             **Triggered by:** ${{ github.actor }}
             **Preview URL:** ${{ steps.deploy.outputs.details_url }}
           url: ${{ github.event.pull_request.html_url }}
-          username: GitHub Actions
+          username: Firebase Grades
