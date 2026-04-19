@@ -10,29 +10,6 @@ A personal Canvas LMS grade viewer and assignment tracker. Users sign in with Go
 3. **Admin panel** — a separate page (`admin.html`) lets the hardcoded admin manage the email allowlist (add, remove, enable/disable).
 4. **Automated notifications** — a cron process checks for unsubmitted assignments due within 4 hours and sends email alerts via Resend.
 
-## Repository Layout
-
-```
-public/                 # Firebase Hosting: vanilla JS SPA (no build step)
-  index.html            # Main page — grades + assignments views
-  app.js                # Firebase SDK (CDN), auth, Firestore listeners, backend calls
-  admin.html            # Admin page — manage allowed emails
-  admin.js              # Admin page logic (list/add/remove/toggle emails)
-  styles.css            # Shared stylesheet for both pages
-  404.html              # Custom 404 page
-
-server.js               # Node.js/Express backend — all routes, helpers, Firebase Admin init
-cron.js                 # Scheduled jobs — assignment refresh + due-soon email notifications
-package.json            # ES modules ("type":"module"), node 18
-firebase-admin.json     # Firebase service account credentials (not committed)
-.env                    # Environment variables loaded via dotenv (not committed)
-
-firebase.json           # Firebase project config (Hosting + Firestore)
-firestore.rules         # Firestore security rules
-firestore.indexes.json  # Firestore composite indexes
-.github/workflows/      # GitHub Actions for Firebase Hosting deploy on merge/PR
-```
-
 ## Architecture
 
 **Three separate processes:**
@@ -50,86 +27,91 @@ firestore.indexes.json  # Firestore composite indexes
 4. Canvas API calls paginate via `Link` headers; concurrency is limited to 5 parallel requests for assignments.
 5. Data is written to Firestore via batches; `onSnapshot` listeners in the frontend auto-update the UI.
 
-**Cron → Backend communication:** `cron.js` calls `server.js` endpoints via `http://localhost:{port}`. Localhost requests bypass Firebase auth (see `isLocalhostRequest()` in server.js).
+**Cron → Backend communication:** `cron.js` calls `server.js` endpoints via `http://localhost:{port}`. Localhost requests bypass Firebase auth — see `isLocalhostRequest()` in `server.js`.
 
-**Multi-Canvas support:** The backend supports multiple Canvas instances. The primary instance is configured via `CANVAS_BASE_URL`/`CANVAS_TOKEN`. An optional second instance can be added via `CANVAS2_BASE_URL`/`CANVAS2_TOKEN` — both are queried in parallel during refresh.
-
-**Backend routes:**
-- `GET /health` — liveness check
-- `POST /refresh` — fetch all active Canvas courses + scores → write to Firestore `grades/{courseId}`
-- `POST /refresh-assignments` — fetch all assignments (with submission data) for every active course → write to Firestore `assignments/{assignmentId}`
-- `POST /admin/emails` — manage allowed emails; body `{ action, email?, enabled? }` where action is `list`, `add`, `remove`, or `toggle` (admin-only, hardcoded to `smi23081@byui.edu`)
-- `POST /deploy` — GitHub webhook (HMAC-SHA256 verified); runs `git pull && npm install && pm2 restart firebase-grades && pm2 restart firebase-grades-cron`
-
-**Cron jobs (in `cron.js`):**
-- Every 2 hours — calls `POST /refresh-assignments` on the local backend
-- Every 15 minutes — queries Firestore for unsubmitted assignments due within 4 hours, sends email via Resend, marks them `notified: true`
-- Both jobs also run once on startup
-
-**Firestore collections:**
-- `grades/{courseId}` — course name, grade letter, numeric score, last checked timestamp
-- `assignments/{assignmentId}` — assignment name, course, due date, submission/graded status, score, `notified` flag, last updated
-- `allowedEmails/{email}` — `{ enabled: boolean }` access control
-
-**Ignored courses:** `IGNORED_COURSE_IDS` in `server.js` and `IGNORED_COURSE_NAMES` in `app.js` filter out non-class entries from Canvas.
+**Multi-Canvas support:** The primary instance is configured via `CANVAS_BASE_URL`/`CANVAS_TOKEN`. An optional second instance via `CANVAS2_BASE_URL`/`CANVAS2_TOKEN` — both are queried in parallel during refresh.
 
 ## Running Locally
 
 ```bash
 npm install
+node server.js     # start the backend
+node cron.js       # start the cron worker (requires backend to be running)
 ```
 
-Environment variables are loaded from a `.env` file via dotenv. Required variables:
+There are no npm scripts, no test runner, and no linter configured.
+
+**Required `.env` variables:**
 ```
 CANVAS_BASE_URL=https://byui.instructure.com
 CANVAS_TOKEN=<canvas api token>
 ADMIN_EMAIL=<your email>
-RESEND_API_KEY=<resend api key>           # required for cron.js
+RESEND_API_KEY=<resend api key>           # required for cron.js only
 PORT=8080                                  # optional, defaults to 8080
 BACKEND_PORT=8080                          # optional, used by cron.js, defaults to 8080
-CANVAS2_BASE_URL=<second url>              # optional, second Canvas instance
-CANVAS2_TOKEN=<second token>               # optional, second Canvas instance
+CANVAS2_BASE_URL=<second url>              # optional
+CANVAS2_TOKEN=<second token>               # optional
 GITHUB_WEBHOOK_SECRET=<secret>             # optional, only needed for /deploy
 ```
 
-Firebase credentials are read from `firebase-admin.json` in the project root (not committed).
+Firebase Admin credentials must be in `firebase-admin.json` at the project root (not committed).
 
+**pm2 on the home server:**
 ```bash
-node server.js          # start the backend
-node cron.js            # start the cron worker (requires backend to be running)
+pm2 start server.js --name firebase-grades
+pm2 start cron.js --name firebase-grades-cron
 ```
-
-On the home server, the processes are managed by pm2:
-- `pm2 start server.js --name firebase-grades`
-- `pm2 start cron.js --name firebase-grades-cron`
 
 ## Deploying the Frontend
 
 ```bash
-firebase deploy          # deploys public/ to Firebase Hosting
-firebase deploy --only hosting   # hosting only
+firebase deploy --only hosting
 ```
 
-GitHub Actions also auto-deploy on merge to main and create preview URLs on PRs.
+GitHub Actions auto-deploy on merge to `main` and create preview URLs on PRs. Both workflows also post a Discord notification with commit/PR info and the deployed URL. Firebase project: `nigelsmith-pf`. Live URL: `https://grades.ndsironwood.com`.
 
-The Firebase project is `nigelsmith-pf`. The live URL is `https://grades.ndsironwood.com`.
+## Backend Routes (`server.js`)
+
+- `GET /health` — liveness check, no auth
+- `POST /refresh` — fetch all active Canvas courses + scores → write to Firestore `grades/{courseId}`
+- `POST /refresh-assignments` — fetch all assignments with submission data → write to Firestore `assignments/{assignmentId}`
+- `POST /admin/emails` — manage allowlist; body `{ action, email?, enabled? }` where action is `list`, `add`, `remove`, or `toggle`; admin-only (hardcoded to the `ADMIN_EMAIL`)
+- `POST /deploy` — GitHub webhook (HMAC-SHA256 verified); runs `git pull && npm install && pm2 restart ...`
+
+## Cron Jobs (`cron.js`)
+
+- Every 2 hours — calls `POST /refresh-assignments` on the local backend
+- Every 15 minutes — queries Firestore for unsubmitted assignments due within 4 hours, sends email via Resend, marks them `notified: true`
+- Both jobs also run once at startup
+
+## Firestore Collections
+
+- `grades/{courseId}` — `course_id`, `course_name`, `grade` (letter or null), `score` (number or null), `date_checked` (Timestamp). Written with `merge: true` to preserve any extra fields.
+- `assignments/{assignmentId}` — `course_id`, `course_name`, `name`, `due_date`, `submission_date`, `submitted`, `graded`, `points`, `max_points`, `notified`, `last_updated`
+- `allowedEmails/{email}` — `{ enabled: boolean }` — access control list
+- `semesterGrades/{semesterId}/classes/{classId}` — GPA calculator data; clients with allowlisted emails can read/write directly
 
 ## Authorization Model
 
-Access to the backend is restricted by the `allowedEmails` Firestore collection. To grant access to a user:
-- Create a document at `allowedEmails/{email}` with `{ enabled: true }`, or use the admin page at `/admin.html`.
+Access requires a document at `allowedEmails/{email}` with `{ enabled: true }`. Add via admin page at `/admin.html` or directly in Firestore.
 
-The admin page and `/admin/emails` endpoint are restricted to the hardcoded admin email (`smi23081@byui.edu`).
+The `/admin/emails` endpoint is restricted to the hardcoded `ADMIN_EMAIL`. Localhost requests (from `cron.js`) bypass token verification entirely — see `isLocalhostRequest()`.
 
-Localhost requests (from `cron.js`) bypass token verification entirely — see `isLocalhostRequest()` in `server.js`.
+## Key Helpers in `server.js`
+
+- `fetchAllCanvas(url, token)` — paginates Canvas API via `Link` headers, hard-stops at 20 pages
+- `mapLimit(items, limit, asyncFn)` — concurrency-limited async map; used with limit=5 for assignment fetches
+- `withTimeout(promise, ms)` — wraps a promise with a timeout rejection
+- `fetchWithTimeout(url, opts)` — `fetch` with a 15 s AbortController timeout
+- `allowCache` — 60 s in-memory TTL cache for `allowedEmails` lookups; invalidated on add/remove/toggle
 
 ## Key Design Decisions
 
-- **No build toolchain** — the frontend is plain HTML/JS using Firebase SDK from CDN. No npm, no bundler.
+- **No build toolchain** — frontend is plain HTML/JS using Firebase SDK from CDN.
 - **Single-file backend** — all logic lives in `server.js`. Keep it that way unless complexity demands otherwise.
-- **Separate cron process** — `cron.js` runs as its own pm2 process alongside `server.js`. It calls backend endpoints via localhost rather than duplicating Canvas/Firestore logic.
-- **Canvas pagination safety cap** — `fetchAllCanvas` stops after 20 pages to prevent runaway requests on the home server.
-- **Firestore batch limit** — assignment writes chunk at 500 docs per batch (Firestore's limit).
+- **ES modules** — `package.json` has `"type": "module"`; use `import`/`export` throughout.
+- **Ignored courses** — `IGNORED_COURSE_IDS` (48558, 47054) in `server.js` and `IGNORED_COURSE_NAMES` ("cse majors", "mathematics majors") in `app.js` filter out non-class Canvas entries.
+- **CORS allowlist** — hardcoded `allowedOrigins` array in `server.js`; update when adding new frontend origins.
+- **Firestore batch limit** — assignment writes chunk at 500 docs per batch.
 - **30 s request timeout** — Express middleware hard-stops requests that take too long.
-- **CORS allowlist** is hardcoded in `server.js` (`allowedOrigins` array). Update it when adding new frontend origins.
-- **Email notifications** use Resend with the `notified` flag on assignment docs to avoid duplicate alerts.
+- **Email deduplication** — `notified` flag on assignment docs prevents duplicate Resend alerts.
